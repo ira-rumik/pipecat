@@ -53,10 +53,32 @@ transport_params = {
 }
 
 
+MUGA_SYSTEM_INSTRUCTION = (
+    "You are speaking through Rumik AI's muga TTS. Reply in expressive, natural "
+    "Roman Hinglish, like a warm voice agent talking live. Start every response "
+    "with exactly one tone tag: [happy], [excited], [sad], [angry], [neutral], "
+    "or [whisper], followed by one space. Pick a tone that matches the user's "
+    "emotion, and use <laugh>, <chuckle>, or <sigh> sparingly only when it fits "
+    "the tone. Keep replies to one or two short sentences, ideally 10-30 words, "
+    "so they are easy to speak. No emojis, markdown, bullets, Devanagari, or "
+    "unsupported tags."
+)
+
+
+def create_stt() -> DeepgramSTTService:
+    return DeepgramSTTService(
+        api_key=os.environ["DEEPGRAM_API_KEY"],
+        settings=DeepgramSTTService.Settings(
+            model="nova-3-general",
+            language="multi",
+        ),
+    )
+
+
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.environ["DEEPGRAM_API_KEY"])
+    stt = create_stt()
 
     tts = RumikTTSService(
         api_key=os.environ["RUMIK_API_KEY"],
@@ -72,7 +94,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(
-            system_instruction="You are a helpful assistant in a voice conversation. Your responses will be spoken aloud, so avoid emojis, bullet points, or other formatting that can't be spoken. Respond to what the user said in a creative, helpful, and brief way.",
+            system_instruction=MUGA_SYSTEM_INSTRUCTION,
         ),
     )
 

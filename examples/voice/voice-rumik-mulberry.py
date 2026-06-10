@@ -36,8 +36,6 @@ def optional_int_env(name: str) -> int | None:
     return int(value) if value else None
 
 
-# We use lambdas to defer transport parameter creation until the transport
-# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
@@ -54,18 +52,6 @@ transport_params = {
 }
 
 
-MUGA_SYSTEM_INSTRUCTION = (
-    "You are speaking through Rumik AI's muga TTS. Reply in expressive, natural "
-    "Roman Hinglish, like a warm voice agent talking live. Start every response "
-    "with exactly one tone tag: [happy], [excited], [sad], [angry], [neutral], "
-    "or [whisper], followed by one space. Pick a tone that matches the user's "
-    "emotion, and use <laugh>, <chuckle>, or <sigh> sparingly only when it fits "
-    "the tone. Keep replies to one or two short sentences, ideally 10-30 words, "
-    "so they are easy to speak. No emojis, markdown, bullets, Devanagari, or "
-    "unsupported tags."
-)
-
-
 def create_stt() -> DeepgramSTTService:
     return DeepgramSTTService(
         api_key=os.environ["DEEPGRAM_API_KEY"],
@@ -76,8 +62,23 @@ def create_stt() -> DeepgramSTTService:
     )
 
 
+MULBERRY_VOICE_DESCRIPTION = (
+    "expressive warm Indian conversational voice, friendly and emotionally present, "
+    "with natural pauses, gentle emphasis, and a polished voice-agent delivery"
+)
+
+MULBERRY_SYSTEM_INSTRUCTION = (
+    "You are speaking through Rumik AI's Mulberry TTS. Reply in natural Roman "
+    "Hinglish with expressive, human phrasing. Keep responses to one or two short "
+    "sentences, ideally 10-30 words, so they sound good when spoken. Match the "
+    "user's emotion with warmth, curiosity, and subtle emphasis in the wording. "
+    "Do not use Muga tone tags like [happy], event tags like <laugh>, emojis, "
+    "markdown, bullets, or Devanagari."
+)
+
+
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting Rumik AI mulberry voice bot")
 
     stt = create_stt()
 
@@ -85,17 +86,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.environ["RUMIK_API_KEY"],
         gateway_url=os.environ["RUMIK_GATEWAY_URL"],
         settings=RumikTTSService.Settings(
-            model=os.getenv("RUMIK_MODEL", "muga"),
-            voice=os.getenv("RUMIK_SPEAKER") or None,
-            description=os.getenv("RUMIK_DESCRIPTION") or None,
-            f0_up_key=optional_int_env("RUMIK_F0_UP_KEY"),
+            model="mulberry",
+            voice=os.getenv("RUMIK_SPEAKER") or "speaker_1",
+            description=os.getenv("RUMIK_DESCRIPTION") or MULBERRY_VOICE_DESCRIPTION,
+            f0_up_key=optional_int_env("RUMIK_F0_UP_KEY") or 10,
         ),
     )
 
     llm = OpenAILLMService(
         api_key=os.environ["OPENAI_API_KEY"],
         settings=OpenAILLMService.Settings(
-            system_instruction=MUGA_SYSTEM_INSTRUCTION,
+            system_instruction=MULBERRY_SYSTEM_INSTRUCTION,
         ),
     )
 
@@ -107,13 +108,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     pipeline = Pipeline(
         [
-            transport.input(),  # Transport user input
-            stt,  # STT
-            user_aggregator,  # User responses
-            llm,  # LLM
-            tts,  # TTS
-            transport.output(),  # Transport bot output
-            assistant_aggregator,  # Assistant spoken responses
+            transport.input(),
+            stt,
+            user_aggregator,
+            llm,
+            tts,
+            transport.output(),
+            assistant_aggregator,
         ]
     )
 
@@ -128,8 +129,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
-        # Kick off the conversation.
+        logger.info("Client connected")
         context.add_message(
             {"role": "developer", "content": "Please introduce yourself to the user."}
         )
@@ -137,7 +137,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
+        logger.info("Client disconnected")
         await worker.cancel()
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)

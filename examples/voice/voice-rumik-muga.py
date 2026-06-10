@@ -31,13 +31,6 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 
-def optional_int_env(name: str) -> int | None:
-    value = os.getenv(name)
-    return int(value) if value else None
-
-
-# We use lambdas to defer transport parameter creation until the transport
-# type is selected at runtime.
 transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
@@ -77,7 +70,7 @@ def create_stt() -> DeepgramSTTService:
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
-    logger.info(f"Starting bot")
+    logger.info("Starting Rumik AI muga voice bot")
 
     stt = create_stt()
 
@@ -85,10 +78,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.environ["RUMIK_API_KEY"],
         gateway_url=os.environ["RUMIK_GATEWAY_URL"],
         settings=RumikTTSService.Settings(
-            model=os.getenv("RUMIK_MODEL", "muga"),
-            voice=os.getenv("RUMIK_SPEAKER") or None,
-            description=os.getenv("RUMIK_DESCRIPTION") or None,
-            f0_up_key=optional_int_env("RUMIK_F0_UP_KEY"),
+            model="muga",
         ),
     )
 
@@ -107,13 +97,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     pipeline = Pipeline(
         [
-            transport.input(),  # Transport user input
-            stt,  # STT
-            user_aggregator,  # User responses
-            llm,  # LLM
-            tts,  # TTS
-            transport.output(),  # Transport bot output
-            assistant_aggregator,  # Assistant spoken responses
+            transport.input(),
+            stt,
+            user_aggregator,
+            llm,
+            tts,
+            transport.output(),
+            assistant_aggregator,
         ]
     )
 
@@ -128,8 +118,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
-        # Kick off the conversation.
+        logger.info("Client connected")
         context.add_message(
             {"role": "developer", "content": "Please introduce yourself to the user."}
         )
@@ -137,7 +126,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
-        logger.info(f"Client disconnected")
+        logger.info("Client disconnected")
         await worker.cancel()
 
     runner = WorkerRunner(handle_sigint=runner_args.handle_sigint)

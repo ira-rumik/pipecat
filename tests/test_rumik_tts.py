@@ -217,6 +217,8 @@ class RumikHttpTTSServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(frame.sample_rate, 24000)
         self.assertEqual(frame.num_channels, 1)
         self.assertEqual(frame.context_id, "ctx-1")
+        _, kwargs = session.calls[0]
+        self.assertEqual(kwargs["json"], {"text": "hello", "model": "muga"})
 
     async def test_invalid_wav_contract_yields_error_frame(self):
         session = _FakeHttpClientSession(
@@ -235,7 +237,7 @@ class RumikHttpTTSServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Expected 24000 Hz WAV", frames[0].error)
 
     async def test_http_error_statuses_yield_error_frame(self):
-        for status in (401, 402, 429, 502):
+        for status in (400, 401, 402, 403, 422, 429, 502, 503):
             with self.subTest(status=status):
                 session = _FakeHttpClientSession(
                     _FakeHttpResponse(status=status, text="provider error")
@@ -263,10 +265,11 @@ class RumikTTSServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(service._settings.voice)
         self.assertIsNone(service._settings.description)
         self.assertIsNone(service._settings.f0_up_key)
-        self.assertEqual(service._settings.temperature, 0.6)
-        self.assertEqual(service._settings.top_p, 0.95)
-        self.assertEqual(service._settings.top_k, 50)
-        self.assertEqual(service._settings.repetition_penalty, 1.2)
+        self.assertIsNone(service._settings.temperature)
+        self.assertIsNone(service._settings.top_p)
+        self.assertIsNone(service._settings.top_k)
+        self.assertIsNone(service._settings.repetition_penalty)
+        self.assertIsNone(service._settings.max_new_tokens)
 
         aggregations = [
             aggregation async for aggregation in service._text_aggregator.aggregate("Hello. ")
@@ -348,11 +351,6 @@ class RumikTTSServiceTests(unittest.IsolatedAsyncioTestCase):
                     "description": "calm narrator",
                     "speaker": "speaker_3",
                     "f0_up_key": 2,
-                    "temperature": 0.6,
-                    "top_p": 0.95,
-                    "top_k": 50,
-                    "repetition_penalty": 1.2,
-                    "max_new_tokens": 2048,
                 }
             ],
         )
@@ -365,6 +363,16 @@ class RumikTTSServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(service._active_context_id)
         self.assertFalse(service._synthesis_lock.locked())
+
+    async def test_run_tts_default_payload_sends_only_text(self):
+        service = RumikTTSService(api_key="key", gateway_url="https://example.test")
+        service._websocket = _FakeWebSocket()
+
+        frames = [frame async for frame in service.run_tts(" hello ", "ctx-1")]
+
+        self.assertEqual(frames, [None])
+        self.assertEqual(service._websocket.sent, [{"text": "hello"}])
+        service._clear_active_context()
 
     async def test_binary_audio_and_done_are_appended_to_active_context(self):
         service = RumikTTSService(api_key="key", gateway_url="https://example.test")
@@ -387,7 +395,8 @@ class RumikTTSServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_error_control_frame_appends_error_then_stop(self):
         service = RumikTTSService(api_key="key", gateway_url="https://example.test")
         service._active_context_id = "ctx-1"
-        service._websocket = _FakeWebSocket([json.dumps({"type": "error", "message": "bad"})])
+        websocket = _FakeWebSocket([json.dumps({"type": "error", "message": "bad"})])
+        service._websocket = websocket
         service.append_to_audio_context = AsyncMock()
         service.remove_audio_context = AsyncMock()
 
@@ -397,6 +406,9 @@ class RumikTTSServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(appended_frames[0], ErrorFrame)
         self.assertIsInstance(appended_frames[1], TTSStoppedFrame)
         service.remove_audio_context.assert_awaited_once_with("ctx-1")
+        self.assertEqual(websocket.sent, [{"type": "close"}])
+        self.assertTrue(websocket.closed)
+        self.assertIsNone(service._websocket)
 
     async def test_disconnect_sends_close_frame(self):
         service = RumikTTSService(api_key="key", gateway_url="https://example.test")

@@ -4,9 +4,9 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Rumik Voice API text-to-speech service implementations.
+"""Rumik AI Voice API text-to-speech service implementations.
 
-This module provides TTS services using Rumik's Voice API. Requests
+This module provides TTS services using Rumik AI's Voice API. Requests
 authenticate with a Bearer token in the ``Authorization`` header.
 
 **Service Variants:**
@@ -29,12 +29,12 @@ authenticate with a Bearer token in the ``Authorization`` header.
 **Models and Settings:**
 
 - ``muga``: Conversational speech model.
-- ``mulberry``: Higher-quality TTS model when enabled by the Rumik deployment.
-- ``voice`` is sent to Rumik as ``speaker`` for preset Mulberry voices.
+- ``mulberry``: Higher-quality TTS model when enabled by the Rumik AI deployment.
+- ``voice`` is sent to Rumik AI as ``speaker`` for preset Mulberry voices.
 - Synthesis settings include ``description``, ``f0_up_key``, ``temperature``,
   ``top_p``, ``top_k``, ``repetition_penalty``, and ``max_new_tokens``.
 
-Rumik currently returns 24 kHz mono PCM audio. The ``sample_rate`` parameter
+Rumik AI currently returns 24 kHz mono PCM audio. The ``sample_rate`` parameter
 must therefore be 24000 Hz.
 """
 
@@ -61,7 +61,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven, assert_given
+from pipecat.services.settings import NOT_GIVEN, TTSSettings, _NotGiven
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.utils.text.base_text_aggregator import (
     Aggregation,
@@ -81,11 +81,6 @@ except ModuleNotFoundError as e:
 
 RUMIK_SAMPLE_RATE = 24000
 RUMIK_DEFAULT_MODEL = "muga"
-RUMIK_DEFAULT_TEMPERATURE = 0.6
-RUMIK_DEFAULT_TOP_P = 0.95
-RUMIK_DEFAULT_TOP_K = 50
-RUMIK_DEFAULT_REPETITION_PENALTY = 1.2
-RUMIK_DEFAULT_MAX_NEW_TOKENS = 2048
 
 
 @dataclass
@@ -122,6 +117,10 @@ def _validate_sample_rate(sample_rate: int | None) -> int:
     return sample_rate
 
 
+def _settings_value(value):
+    return None if value is NOT_GIVEN else value
+
+
 def _default_settings() -> RumikTTSSettings:
     return RumikTTSSettings(
         model=RUMIK_DEFAULT_MODEL,
@@ -129,11 +128,11 @@ def _default_settings() -> RumikTTSSettings:
         language=None,
         description=None,
         f0_up_key=None,
-        temperature=RUMIK_DEFAULT_TEMPERATURE,
-        top_p=RUMIK_DEFAULT_TOP_P,
-        top_k=RUMIK_DEFAULT_TOP_K,
-        repetition_penalty=RUMIK_DEFAULT_REPETITION_PENALTY,
-        max_new_tokens=RUMIK_DEFAULT_MAX_NEW_TOKENS,
+        temperature=None,
+        top_p=None,
+        top_k=None,
+        repetition_penalty=None,
+        max_new_tokens=None,
     )
 
 
@@ -142,15 +141,15 @@ def _build_synthesis_payload(
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {"text": text}
 
-    model = assert_given(settings.model) or RUMIK_DEFAULT_MODEL
-    voice = assert_given(settings.voice)
-    description = assert_given(settings.description)
-    f0_up_key = assert_given(settings.f0_up_key)
-    temperature = assert_given(settings.temperature)
-    top_p = assert_given(settings.top_p)
-    top_k = assert_given(settings.top_k)
-    repetition_penalty = assert_given(settings.repetition_penalty)
-    max_new_tokens = assert_given(settings.max_new_tokens)
+    model = _settings_value(settings.model) or RUMIK_DEFAULT_MODEL
+    voice = _settings_value(settings.voice)
+    description = _settings_value(settings.description)
+    f0_up_key = _settings_value(settings.f0_up_key)
+    temperature = _settings_value(settings.temperature)
+    top_p = _settings_value(settings.top_p)
+    top_k = _settings_value(settings.top_k)
+    repetition_penalty = _settings_value(settings.repetition_penalty)
+    max_new_tokens = _settings_value(settings.max_new_tokens)
 
     if include_model:
         payload["model"] = model
@@ -228,12 +227,12 @@ class RumikTTSService(InterruptibleTTSService):
         """Initialize the Rumik WebSocket TTS service.
 
         Args:
-            api_key: Rumik API key.
-            gateway_url: Rumik gateway base URL.
+            api_key: Rumik AI API key.
+            gateway_url: Rumik AI gateway base URL.
             settings: Runtime-updatable Rumik TTS settings.
-            sample_rate: Output audio sample rate. Rumik currently returns 24 kHz PCM.
+            sample_rate: Output audio sample rate. Rumik AI currently returns 24 kHz PCM.
             full_response_aggregation: When true, buffer a complete LLM response
-                before sending text to Rumik to avoid sentence-level TTFB gaps.
+                before sending text to Rumik AI to avoid sentence-level TTFB gaps.
             **kwargs: Additional arguments passed to ``InterruptibleTTSService``.
         """
         default_settings = _default_settings()
@@ -352,7 +351,7 @@ class RumikTTSService(InterruptibleTTSService):
 
     async def _mint_websocket_session(self) -> dict[str, Any]:
         mint_url = f"{self._gateway_url}/v1/tts/ws-connect"
-        model = assert_given(self._settings.model) or RUMIK_DEFAULT_MODEL
+        model = _settings_value(self._settings.model) or RUMIK_DEFAULT_MODEL
         timeout = aiohttp.ClientTimeout(total=10)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.post(
@@ -437,6 +436,8 @@ class RumikTTSService(InterruptibleTTSService):
                     break
                 elif message_type == "error" or data.get("error"):
                     await self._finish_active_context(error_msg=f"Rumik TTS error: {data}")
+                    await self._disconnect_websocket()
+                    break
                 else:
                     logger.debug(f"{self}: unknown Rumik message: {data}")
         except asyncio.CancelledError:
@@ -523,11 +524,11 @@ class RumikHttpTTSService(TTSService):
         """Initialize the Rumik HTTP TTS service.
 
         Args:
-            api_key: Rumik API key.
-            gateway_url: Rumik gateway base URL.
+            api_key: Rumik AI API key.
+            gateway_url: Rumik AI gateway base URL.
             aiohttp_session: Caller-owned HTTP session.
             settings: Runtime-updatable Rumik TTS settings.
-            sample_rate: Output audio sample rate. Rumik currently returns 24 kHz PCM.
+            sample_rate: Output audio sample rate. Rumik AI currently returns 24 kHz PCM.
             **kwargs: Additional arguments passed to ``TTSService``.
         """
         default_settings = _default_settings()
